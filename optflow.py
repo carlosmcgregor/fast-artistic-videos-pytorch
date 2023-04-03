@@ -55,7 +55,7 @@ def optflow(start, frames, dst, method):
     for idx in range(start, start + len(frames)-1):
         # If there isn't room in the jobs list, wait for a thread to finish.
         while len(running) >= MAX_OPTFLOW_JOBS:
-            running = [thread for thread in running if thread.isAlive()]
+            running = [thread for thread in running if thread.is_alive()]
             time.sleep(1)
         # Optical flow files are 1-indexed.
         start_name, end_name = claim_job(idx + 1, frames, dst)

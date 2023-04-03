@@ -30,6 +30,8 @@ except:
     from . import optflow
     from .sconst import *
 
+device = torch.device('mps')
+
 class LambdaBase(nn.Sequential):
     def __init__(self, fn, *args):
         super(LambdaBase, self).__init__(*args)
@@ -96,7 +98,7 @@ class StylizationModel():
                     nn.ConstantPad2d(-2, 0),
                 ),
                 LambdaReduce(lambda x,y: x+y), # CAddTable,
-            ),
+            ).to(device),
             nn.Sequential( # Sequential,
                 LambdaMap(lambda x: x, # ConcatTable,
                     nn.Sequential( # Sequential,
@@ -109,7 +111,7 @@ class StylizationModel():
                     nn.ConstantPad2d(-2, 0),
                 ),
                 LambdaReduce(lambda x,y: x+y), # CAddTable,
-            ),
+            ).to(device),
             nn.Sequential( # Sequential,
                 LambdaMap(lambda x: x, # ConcatTable,
                     nn.Sequential( # Sequential,
@@ -122,7 +124,7 @@ class StylizationModel():
                     nn.ConstantPad2d(-2, 0),
                 ),
                 LambdaReduce(lambda x,y: x+y), # CAddTable,
-            ),
+            ).to(device),
             nn.Sequential( # Sequential,
                 LambdaMap(lambda x: x, # ConcatTable,
                     nn.Sequential( # Sequential,
@@ -135,7 +137,7 @@ class StylizationModel():
                     nn.ConstantPad2d(-2, 0),
                 ),
                 LambdaReduce(lambda x,y: x+y), # CAddTable,
-            ),
+            ).to(device),
             nn.Sequential( # Sequential,
                 LambdaMap(lambda x: x, # ConcatTable,
                     nn.Sequential( # Sequential,
@@ -144,11 +146,11 @@ class StylizationModel():
                         nn.ReLU(),
                         nn.Conv2d(128,128,(3, 3)),
                         nn.InstanceNorm2d(128, affine=True),
-                    ),
+                    ).to(device),
                     nn.ConstantPad2d(-2, 0),
                 ),
                 LambdaReduce(lambda x,y: x+y), # CAddTable,
-            ),
+            ).to(device),
             Interpolate(scale_factor=2),
             nn.InstanceNorm2d(128, affine=True),
             nn.ReLU(),
@@ -162,7 +164,7 @@ class StylizationModel():
             nn.Tanh(),
             Lambda(lambda x: x * 150),
             Lambda(lambda x: x), # nn.TotalVariation,
-        )
+        ).to(device)
         
         # Min filter used to limit signal of consistency check
         self.min_filter = nn.Sequential(
@@ -171,7 +173,7 @@ class StylizationModel():
             nn.MaxPool2d((7, 7), (1, 1), (3, 3)),
             Lambda(lambda x: x * -1),
             Lambda(lambda x: x + 1)
-        )
+        ).to(device)
         
         self.model.eval()
         self.min_filter.eval()
@@ -186,7 +188,7 @@ class StylizationModel():
             self.eval = True
     
     def set_fname(self, weights_fname):
-        self.model.load_state_dict(torch.load(weights_fname))
+        self.model.load_state_dict(torch.load(weights_fname, map_location=device))
         logging.info('...{} loaded.'.format(weights_fname))
     
     def set_weights(self, weights):
@@ -197,9 +199,9 @@ class StylizationModel():
     def run_image(self, img):
         start = time.time()
         # Preprocess the current input image
-        pre = styutils.preprocess(img)
+        pre = styutils.preprocess(img).to(device)
         # All optical flow fields are blank for the first image
-        blanks = torch.zeros((1, 4, pre.shape[-2], pre.shape[-1]))
+        blanks = torch.zeros((1, 4, pre.shape[-2], pre.shape[-1])).to(device)
         # Concatenate everything into a tensor of shape (1, 7, height, width)
         tmp = torch.cat((pre, blanks), dim=1)
         # Run the tensor through the model
@@ -215,7 +217,7 @@ class StylizationModel():
         # Preprocess the current input image (h, w, 3) -> (1, 3, h, w)
         pre = styutils.preprocess(img)
         # Consistency check preprocessing: Apply min filter
-        pre_cert = self.min_filter.forward(torch.FloatTensor(cert / 255).unsqueeze(0).unsqueeze(0))
+        pre_cert = self.min_filter.forward(torch.FloatTensor(cert / 255).unsqueeze(0).unsqueeze(0).to(device))
         # Warp the previous output with the optical flow between the new image and previous image
         prev_warped = styutils.warp(prev, flow)
         # Apply preprocessing to the warped image
@@ -223,7 +225,7 @@ class StylizationModel():
         # Mask the warped image with the consistency check
         prev_warped_masked = prev_warped_pre * pre_cert.expand_as(prev_warped_pre)
         # Concatenate everything into a tensor of shape (1, 7, height, width)
-        tmp = torch.cat((pre, prev_warped_masked, pre_cert), dim=1)
+        tmp = torch.cat((pre, prev_warped_masked, pre_cert), dim=1).to(device)
         # Run the tensor through the model
         out = self.model.forward(tmp)
         # Deprocess and return the result
@@ -245,14 +247,15 @@ class StylizationModel():
             out_fname = str(dst / (OUTPUT_FORMAT % (idx + start + 1)))
             # img shape is (h, w, 3), range is [0-255], uint8
             img = cv2.imread(fname)
-            
+
             if idx == 0:
                 if self.seed_fname:
                     out = cv2.imread(self.seed_fname)
                 else:
                     # Independent style transfer is equivalent to Fast Neural Style by Johnson et al.
                     out = self.run_image(img)
-                if self.eval: crit.eval(img, out, None)
+                if self.eval:
+                    crit.eval(img, out, None)
             else:
                 flowname = str(dst / 'backward_{}_{}.flo'.format(idx + start + 1, idx + start))
                 certname = str(dst / 'reliable_{}_{}.pgm'.format(idx + start + 1, idx + start))

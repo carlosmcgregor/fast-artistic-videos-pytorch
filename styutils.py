@@ -18,6 +18,8 @@ try:
 except:
     from .sconst import *
 
+device = torch.device('mps')
+
 def start_logging():
     '''
     Begins Python's logging capabilities in a default configuration. Logs are appended to a 
@@ -42,10 +44,10 @@ def preprocess(img):
     tmp = np.swapaxes(np.swapaxes(img, 0, 1), 0, 2)
     
     # Unsqueeze
-    usq = torch.Tensor(tmp).unsqueeze(0)
+    usq = torch.Tensor(tmp).to(device).unsqueeze(0)
     
     # Subtract mean
-    mean = torch.FloatTensor(VGG_MEAN).view((1, 3, 1, 1)).expand_as(usq)
+    mean = torch.FloatTensor(VGG_MEAN).view((1, 3, 1, 1)).to(device).expand_as(usq)
     sub = usq - mean
     
     return sub
@@ -57,10 +59,10 @@ def deprocess(img):
     assert(img.shape[1] == 3)
     
     # Add mean
-    mean = torch.FloatTensor(VGG_MEAN).view((1, 3, 1, 1)).expand_as(img)
+    mean = torch.FloatTensor(VGG_MEAN).view((1, 3, 1, 1)).expand_as(img).to(device)
     add = img + mean
     # Squeeze
-    sqz = torch.squeeze(add).detach().numpy()
+    sqz = torch.squeeze(add.cpu()).detach().numpy()
     
     # Swap axes
     tmp = np.swapaxes(np.swapaxes(sqz, 0, 2), 0, 1)
